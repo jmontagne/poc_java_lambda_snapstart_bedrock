@@ -439,53 +439,34 @@ POC_java_snapstart_bedrock/
 
 ### Data Flow
 
+```mermaid
+sequenceDiagram
+    participant User
+    participant Lambda as AWS Lambda (SnapStart)
+    participant Spring as Spring Cloud Function
+    participant Bedrock as AWS Bedrock (Claude 3.5)
+
+    Note over Lambda: Environment Pre-initialized<br/>(JVM & Context Ready via CRaC)
+
+    User->>Lambda: POST /askAi "What is SnapStart?"
+    activate Lambda
+    
+    Lambda->>Spring: Invoke handleRequest()
+    activate Spring
+    
+    Spring->>Bedrock: InvokeModel (JSON)
+    activate Bedrock
+    Note right of Bedrock: Processing by Claude 3.5 Sonnet
+    Bedrock-->>Spring: JSON Response
+    deactivate Bedrock
+    
+    Spring-->>Lambda: Answer String
+    deactivate Spring
+    
+    Lambda-->>User: Response (~500ms total)
+    deactivate Lambda
 ```
-┌─────────────────┐
-│  User           │
-│  (AWS CLI/API)  │
-└────────┬────────┘
-         │ Question: "What is AWS Lambda?"
-         ↓
-┌─────────────────────────────────────────┐
-│  AWS Lambda                             │
-│  ┌───────────────────────────────────┐ │
-│  │ SnapStart Snapshot                │ │
-│  │ - JVM initialized                 │ │
-│  │ - Spring Context ready            │ │
-│  │ - Bedrock Client ready            │ │
-│  └───────────────────────────────────┘ │
-│                                         │
-│  ┌───────────────────────────────────┐ │
-│  │ FunctionInvoker                   │ │
-│  │ (Spring Cloud Function Adapter)   │ │
-│  └──────────────┬────────────────────┘ │
-│                 ↓                       │
-│  ┌───────────────────────────────────┐ │
-│  │ BedrockFunctionConfig             │ │
-│  │ @Bean askAi()                     │ │
-│  └──────────────┬────────────────────┘ │
-│                 ↓                       │
-│  ┌───────────────────────────────────┐ │
-│  │ BedrockService                    │ │
-│  │ - Request preparation             │ │
-│  │ - Bedrock invocation              │ │
-│  │ - Response parsing                │ │
-│  └──────────────┬────────────────────┘ │
-└─────────────────┼───────────────────────┘
-                  │ JSON Request
-                  ↓
-┌─────────────────────────────────────────┐
-│  AWS Bedrock                            │
-│  ┌───────────────────────────────────┐ │
-│  │ Claude 3.5 Sonnet                 │ │
-│  │ - Question analysis               │ │
-│  │ - Response generation             │ │
-│  └──────────────┬────────────────────┘ │
-└─────────────────┼───────────────────────┘
-                  │ JSON Response
-                  ↓
-         Response to user
-```
+
 
 ### System Components
 
