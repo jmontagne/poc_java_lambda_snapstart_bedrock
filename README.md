@@ -9,6 +9,7 @@
 6. [Code Analysis](#code-analysis)
 7. [Configuration and Deployment](#configuration-and-deployment)
 8. [Testing](#testing)
+9. [Observability with AWS Lambda Powertools (Java)](#observability-with-aws-lambda-powertools-java)
 
 ---
 
@@ -1007,13 +1008,82 @@ curl -X POST http://localhost:8080/askAi \
 
 ### Test in AWS Lambda
 
-#### Basic Invocation
+#### Using the Invocation Script
+
+The project includes a convenient shell script to invoke the Lambda function: [`scripts/invoke-lambda.sh`](scripts/invoke-lambda.sh)
+
+**Usage:**
+```bash
+./scripts/invoke-lambda.sh "Your question here"
+```
+
+**Example:**
+```bash
+./scripts/invoke-lambda.sh "What is the price of bitcoin"
+```
+
+**What the script does:**
+
+1. **Prerequisites validation**
+   - Checks that AWS CLI is installed
+   - Checks that a question was provided
+
+2. **Payload preparation**
+   ```bash
+   PAYLOAD=$(cat <<EOF
+   {
+     "question": "$MESSAGE"
+   }
+   EOF
+   )
+   ```
+   - Creates a JSON object with the question
+   - Format expected by the Lambda function
+
+3. **Function invocation**
+   ```bash
+   aws lambda invoke \
+       --function-name "$FUNCTION_NAME" \
+       --region "$REGION" \
+       --payload "$PAYLOAD" \
+       --cli-binary-format raw-in-base64-out \
+       "$OUTPUT_FILE"
+   ```
+   
+   **Important parameters:**
+   - `--payload "$PAYLOAD"`: JSON is passed directly (no manual base64 encoding)
+   - `--cli-binary-format raw-in-base64-out`: Tells AWS CLI that INPUT is in raw format (raw JSON)
+     - AWS CLI automatically handles base64 encoding internally
+     - OUTPUT will be in base64 if needed
+   - `$OUTPUT_FILE`: File to save the response (`lambda-response.json`)
+
+4. **Response display**
+   - Uses `jq` to format JSON (if available)
+   - Otherwise displays raw JSON
+   - Saves to `lambda-response.json`
+
+**Important note about `--cli-binary-format`:**
+- This option defines how AWS CLI handles binary data
+- `raw-in-base64-out` means:
+  - **INPUT (--payload)**: raw format - JSON directly
+  - **OUTPUT**: base64 if necessary
+- AWS CLI automatically encodes the payload to base64 internally before sending
+- ⚠️ Do not manually encode the payload to base64, or you'll get double encoding!
+
+**Script configuration:**
+```bash
+FUNCTION_NAME="java-snapstart-bedrock-poc"
+REGION="us-east-1"
+OUTPUT_FILE="lambda-response.json"
+```
+
+#### Basic Invocation (AWS CLI direct)
 
 ```bash
 aws lambda invoke \
   --function-name java-snapstart-bedrock-poc \
   --region us-east-1 \
-  --payload '"What is AWS Lambda SnapStart?"' \
+  --payload '{"question":"What is AWS Lambda SnapStart?"}' \
   --cli-binary-format raw-in-base64-out \
   response.json
 
@@ -1021,8 +1091,8 @@ cat response.json
 ```
 
 **Parameter explanation:**
-- `--payload` - input data (JSON string)
-- `--cli-binary-format raw-in-base64-out` - data format
+- `--payload` - input data (JSON object with "question" field)
+- `--cli-binary-format raw-in-base64-out` - data format (raw input, base64 output if needed)
 - `response.json` - response file
 
 #### Test with Different Questions
@@ -1165,6 +1235,42 @@ class BedrockFunctionTest {
 ```bash
 mvn test
 ```
+
+---
+
+## Observability with AWS Lambda Powertools (Java)
+
+This project uses **AWS Lambda Powertools for Java** to add production-grade observability utilities without changing the Spring Cloud Function programming model.
+
+### What’s enabled
+
+- **Logging (JSON)**: emits structured logs to stdout with Lambda context fields (request id, cold start, function name, etc.) using Logback.
+- **Metrics (CloudWatch EMF)**: emits custom metrics asynchronously via CloudWatch Embedded Metric Format.
+- **Tracing (AWS X-Ray)**: creates trace subsegments via annotations and automatically instruments AWS SDK v2 client calls when tracing is enabled.
+
+### How it’s wired in this repo
+
+- **Handler**: [src/main/java/org/example/function/PowertoolsFunctionInvoker.java](src/main/java/org/example/function/PowertoolsFunctionInvoker.java) extends Spring Cloud Function’s AWS adapter (`FunctionInvoker`) and applies:
+  - `@Logging(clearState = true)`
+  - `@FlushMetrics(captureColdStart = true)`
+  - `@Tracing`
+- **Structured logging config**: [src/main/resources/logback.xml](src/main/resources/logback.xml) configures `LambdaJsonEncoder` for JSON output.
+- **Business-level metrics**: [src/main/java/org/example/service/BedrockService.java](src/main/java/org/example/service/BedrockService.java) emits `BedrockInvoke` and `BedrockInvokeError` metrics.
+
+### Configuration
+
+Powertools is configured primarily via environment variables (see [terraform/main.tf](terraform/main.tf)):
+
+- `POWERTOOLS_SERVICE_NAME` – service name included in logs/metrics/traces
+- `POWERTOOLS_METRICS_NAMESPACE` – CloudWatch namespace for EMF metrics
+- `POWERTOOLS_LOG_LEVEL` – log verbosity (can be overridden by `AWS_LAMBDA_LOG_LEVEL`)
+- `POWERTOOLS_TRACER_CAPTURE_RESPONSE` / `POWERTOOLS_TRACER_CAPTURE_ERROR` – control whether responses/exceptions are captured as X-Ray metadata
+
+This repo avoids logging the full prompt by default; the function logs `questionLength` instead.
+
+### Notes for tests
+
+The Maven test configuration disables metrics output (`POWERTOOLS_METRICS_DISABLED=true`) and sets `LAMBDA_TASK_ROOT=handler` to keep X-Ray SDK initialization happy during unit tests.
 
 ---
 

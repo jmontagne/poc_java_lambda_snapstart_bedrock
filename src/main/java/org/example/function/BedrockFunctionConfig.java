@@ -1,5 +1,7 @@
 package org.example.function;
 
+import static software.amazon.lambda.powertools.logging.argument.StructuredArguments.entry;
+
 import org.example.service.BedrockService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +23,8 @@ public class BedrockFunctionConfig {
     @Bean
     public Function<String, String> askAi() {
         return question -> {
-            LOG.info("Received question: {}", question);
+            int questionLength = question == null ? 0 : question.length();
+            LOG.info("Received question", entry("questionLength", questionLength));
             return bedrockService.askBedrock(question);
         };
     }

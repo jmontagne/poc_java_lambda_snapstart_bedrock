@@ -14,16 +14,22 @@ import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.amazonaws.xray.interceptors.TracingInterceptor;
 
 import java.nio.charset.StandardCharsets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.lambda.powertools.metrics.Metrics;
+import software.amazon.lambda.powertools.metrics.MetricsFactory;
+import software.amazon.lambda.powertools.metrics.model.MetricUnit;
+import software.amazon.lambda.powertools.tracing.Tracing;
 
 @Service
 public class BedrockService implements Resource {
 
     private static final Logger LOG = LoggerFactory.getLogger(BedrockService.class);
+    private static final Metrics METRICS = MetricsFactory.getMetricsInstance();
     private BedrockRuntimeClient bedrockClient;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -42,7 +48,9 @@ public class BedrockService implements Resource {
                     .region(Region.US_EAST_1) // Defaulting to US_EAST_1, can be parameterized
                     .credentialsProvider(EnvironmentVariableCredentialsProvider.create())
                     .httpClient(UrlConnectionHttpClient.builder().build())
+                    .overrideConfiguration(c -> c.addExecutionInterceptor(new TracingInterceptor()))
                     .build();
+            LOG.info("BedrockClient initialized with X-Ray tracing interceptor");
         }
     }
 
@@ -58,10 +66,13 @@ public class BedrockService implements Resource {
         LOG.info("CRaC: Restored from checkpoint.");
     }
 
+    @Tracing
     public String askBedrock(String question) {
         initClient(); // Ensure initialized if not using SnapStart or first run
 
         try {
+            METRICS.addMetric("BedrockInvoke", 1, MetricUnit.COUNT);
+
             // Construct Claude 3 JSON payload
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("anthropic_version", "bedrock-2023-05-31");
@@ -97,7 +108,8 @@ public class BedrockService implements Resource {
             }
 
         } catch (Exception e) {
-            e.printStackTrace();
+            METRICS.addMetric("BedrockInvokeError", 1, MetricUnit.COUNT);
+            LOG.error("Error invoking Bedrock", e);
             return "Error invoking Bedrock: " + e.getMessage();
         }
     }

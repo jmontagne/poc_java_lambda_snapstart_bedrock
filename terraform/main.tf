@@ -33,6 +33,11 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   role       = aws_iam_role.lambda_role.name
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  role       = aws_iam_role.lambda_role.name
+}
+
 resource "aws_iam_policy" "bedrock_policy" {
   name        = "bedrock_invoke_policy"
   description = "Allow Lambda to invoke Bedrock models"
@@ -60,11 +65,16 @@ resource "aws_lambda_function" "java_snapstart_function" {
   filename      = "../target/poc-java-snapstart-1.0.0-SNAPSHOT-aws.jar"
   function_name = "java-snapstart-bedrock-poc"
   role          = aws_iam_role.lambda_role.arn
-  handler       = "org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest"
+  handler       = "org.example.function.PowertoolsFunctionInvoker::handleRequest"
   runtime       = "java21"
   timeout       = 30
   memory_size   = 2048 # SnapStart benefits from higher memory during restore
   publish       = true
+  source_code_hash = filebase64sha256("../target/poc-java-snapstart-1.0.0-SNAPSHOT-aws.jar")
+
+  tracing_config {
+    mode = "Active"
+  }
 
   # CRITICAL: Enable SnapStart
   snap_start {
@@ -77,6 +87,13 @@ resource "aws_lambda_function" "java_snapstart_function" {
       JAVA_TOOL_OPTIONS = "-XX:+TieredCompilation -XX:TieredStopAtLevel=1"
       # Spring Cloud Function definition
       SPRING_CLOUD_FUNCTION_DEFINITION = "askAi"
+
+      # AWS Lambda Powertools (Java)
+      POWERTOOLS_SERVICE_NAME       = "java-snapstart-bedrock-poc"
+      POWERTOOLS_METRICS_NAMESPACE  = "POCJavaSnapStartBedrock"
+      POWERTOOLS_LOG_LEVEL          = "INFO"
+      POWERTOOLS_TRACER_CAPTURE_RESPONSE = "false"
+      POWERTOOLS_TRACER_CAPTURE_ERROR    = "false"
     }
   }
 }
